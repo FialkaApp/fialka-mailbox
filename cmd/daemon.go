@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fialkaapp/fialka-mailbox/internal/config"
 	"github.com/fialkaapp/fialka-mailbox/internal/storage"
 	"github.com/fialkaapp/fialka-mailbox/internal/tor"
@@ -186,10 +187,40 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	// Start TorTransport TCP server
 	srv := transport.New(store, cfg, log.Logger)
+
+	// Detect interactive terminal: launch TUI; otherwise run headless (systemd, pipe).
+	if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+		// Redirect zerolog into the TUI viewport — server goroutines never write to stdout.
+		logCh := make(chan string, 512)
+		logWriter := &tuiLogWriter{ch: logCh}
+		log.Logger = log.Output(zerolog.ConsoleWriter{
+			Out:        logWriter,
+			TimeFormat: "15:04:05",
+			NoColor:    true,
+		})
+
+		onionAddr := ""
+		if torCtrl != nil {
+			onionAddr = torCtrl.OnionAddress
+		}
+
+		// Server runs in background; TUI drives the main goroutine.
+		go func() { _ = srv.ListenAndServe(ctx, cfg.Server.Listen) }()
+
+		model := newTUIModel(onionAddr, store, cancel, logCh)
+		p := tea.NewProgram(model, tea.WithAltScreen())
+		_, runErr := p.Run()
+		cancel() // ensure server goroutine stops when TUI exits
+		if runErr != nil {
+			return runErr
+		}
+		return nil
+	}
+
+	// Headless mode (systemd service, pipe): block until signal.
 	if err := srv.ListenAndServe(ctx, cfg.Server.Listen); err != nil {
 		return err
 	}
-
 	<-ctx.Done()
 	log.Info().Msg("Fialka Mailbox stopped")
 	return nil

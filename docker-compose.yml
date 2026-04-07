@@ -1,0 +1,12 @@
+services:
+  fialka-mailbox:
+    image: ghcr.io/fialkaapp/fialka-mailbox:latest
+    container_name: fialka-mailbox
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+      - ./config.toml:/app/config.toml:ro
+    ports:
+      # Only expose if expose_direct = true in config
+      # Remove this if using Tor only (recommended)
+      - "127.0.0.1:8765:8765"

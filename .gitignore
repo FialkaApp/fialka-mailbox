@@ -1,0 +1,19 @@
+# Binaries
+fialka
+fialka.exe
+
+# Data
+*.db
+*.db-shm
+*.db-wal
+data/
+tor-data/
+
+# Config (has secrets)
+config.toml
+
+# Build artifacts
+dist/
+
+# Go
+vendor/

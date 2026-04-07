@@ -1,0 +1,41 @@
+[server]
+# HTTP listen address (internal — exposed via Tor only by default)
+listen = "127.0.0.1:8765"
+
+# Expose directly on network (not recommended — use Tor)
+expose_direct = false
+
+[tor]
+enabled = true
+# Path to tor binary (auto-detected if empty)
+tor_binary = ""
+# Data dir for tor keys/state
+data_dir = ""
+
+[storage]
+# SQLite database path
+db_path = "mailbox.db"
+
+[limits]
+# Maximum message size in bytes (default 64 KB)
+max_message_size = 65536
+
+# Maximum messages per recipient
+max_messages_per_recipient = 100
+
+# Message TTL in hours (default 7 days)
+message_ttl_hours = 168
+
+# Maximum total storage in MB
+max_storage_mb = 500
+
+[security]
+# Rate limiting: max deposits per IP per minute
+rate_limit_deposits = 60
+
+# Require Ed25519 signature to fetch messages
+require_auth_fetch = true
+
+[admin]
+# Admin password hash (bcrypt) — set via `fialka config`
+password_hash = ""

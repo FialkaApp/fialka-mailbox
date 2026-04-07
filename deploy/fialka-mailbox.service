@@ -9,8 +9,12 @@ User=fialka
 Group=fialka
 ExecStart=/usr/local/bin/fialka start
 ExecStop=/usr/local/bin/fialka stop
+# Restart: on-failure pour plaintext/TPM, no pour passphrase (géré par install.sh)
 Restart=on-failure
 RestartSec=5s
+
+# TPM mode : décommenté par install.sh si key_protection=tpm
+#LoadCredentialEncrypted=onion-key:/etc/fialka-mailbox/onion-key.cred
 
 # Hardening
 NoNewPrivileges=true
@@ -18,6 +22,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/fialka-mailbox
+ReadWritePaths=/etc/fialka-mailbox
 
 [Install]
 WantedBy=multi-user.target

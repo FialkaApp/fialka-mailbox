@@ -30,6 +30,18 @@ type TorConfig struct {
 	ControlAddr string `mapstructure:"control_addr"`
 	CookieAuth  bool   `mapstructure:"cookie_auth"`
 	Password    string `mapstructure:"password"`
+
+	// KeyProtection controls how the onion private key is protected at rest.
+	//   "plaintext"  -- stored as-is in onion.key (legacy, chmod 0600)
+	//   "passphrase" -- encrypted with argon2id+AES-256-GCM in onion.key.enc;
+	//                   requires manual passphrase entry at every daemon startup
+	//   "tpm"        -- encrypted by systemd-creds using the machine TPM2;
+	//                   fully automatic startup, key never readable from disk alone
+	KeyProtection string `mapstructure:"key_protection"`
+
+	// CredName is the systemd credential name used in TPM mode.
+	// Defaults to "onion-key". Must match LoadCredentialEncrypted= in the service file.
+	CredName string `mapstructure:"cred_name"`
 }
 
 type StorageConfig struct {
@@ -66,6 +78,8 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("tor.control_net", "tcp")
 	v.SetDefault("tor.control_addr", "127.0.0.1:9051")
 	v.SetDefault("tor.cookie_auth", true)
+	v.SetDefault("tor.key_protection", "plaintext")
+	v.SetDefault("tor.cred_name", "onion-key")
 	v.SetDefault("storage.db_path", "mailbox.db")
 	v.SetDefault("limits.max_message_size", 65536)
 	v.SetDefault("limits.max_messages_per_recipient", 100)

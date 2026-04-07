@@ -112,22 +112,20 @@ func (c *Controller) getCookiePath() (string, error) {
 	return "", fmt.Errorf("cookie file not found")
 }
 
-// CreateHiddenService creates (or restores) a v3 hidden service.
-// If a private key was persisted in dataDir/onion.key, it is reused.
-// Otherwise a new key is generated and saved.
-func (c *Controller) CreateHiddenService(targetPort int, listenAddr string) error {
+// CreateHiddenService creates (or restores) a v3 Tor hidden service.
+//
+// privKey is the pre-resolved Ed25519 private key (base64 string as returned
+// by Tor's ADD_ONION response), or "" to request a freshly generated key.
+// The caller is responsible for loading/decrypting the key before calling
+// this function, and for persisting c.OnionPrivKey if a new key was generated.
+func (c *Controller) CreateHiddenService(targetPort int, listenAddr string, privKey string) error {
 	keyArg := "NEW:ED25519-V3"
-
-	// Try to load persisted key
-	keyFile := filepath.Join(c.dataDir, "onion.key")
-	if raw, err := os.ReadFile(keyFile); err == nil {
-		privKey := strings.TrimSpace(string(raw))
-		if privKey != "" {
-			keyArg = "ED25519-V3:" + privKey
-		}
+	isNew := true
+	if strings.TrimSpace(privKey) != "" {
+		keyArg = "ED25519-V3:" + strings.TrimSpace(privKey)
+		isNew = false
 	}
 
-	// ADD_ONION <key> Port=<remotePort>,<listenAddr>
 	cmd := fmt.Sprintf("ADD_ONION %s Port=%d,%s", keyArg, targetPort, listenAddr)
 	if err := c.write(cmd + "\r\n"); err != nil {
 		return err
@@ -145,7 +143,6 @@ func (c *Controller) CreateHiddenService(targetPort int, listenAddr string) erro
 			serviceID = strings.TrimPrefix(line, "250-ServiceID=")
 		}
 		if strings.HasPrefix(line, "250-PrivateKey=") {
-			// Format: ED25519-V3:<base64key>
 			parts := strings.SplitN(strings.TrimPrefix(line, "250-PrivateKey="), ":", 2)
 			if len(parts) == 2 {
 				privateKey = parts[1]
@@ -166,14 +163,9 @@ func (c *Controller) CreateHiddenService(targetPort int, listenAddr string) erro
 	c.ServiceID = serviceID
 	c.OnionAddress = serviceID + ".onion"
 
-	// Persist private key for restarts (if newly generated)
-	if privateKey != "" && keyArg == "NEW:ED25519-V3" {
+	// Expose newly generated key so caller can persist with the right scheme.
+	if isNew && privateKey != "" {
 		c.OnionPrivKey = privateKey
-		if c.dataDir != "" {
-			if err := os.MkdirAll(c.dataDir, 0700); err == nil {
-				_ = os.WriteFile(keyFile, []byte(privateKey), 0600)
-			}
-		}
 	}
 
 	return nil

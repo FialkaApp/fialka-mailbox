@@ -376,6 +376,104 @@ info "Config    → $CONFIG_DIR"
 info "Logs      → $(dirname "$LOG_FILE")"
 
 # ════════════════════════════════════════════════════════════
+#  KEY PROTECTION — Detect TPM2 + choose mode
+# ════════════════════════════════════════════════════════════
+step "Protection de la clé .onion"
+
+echo ""
+echo -e "  La clé Ed25519 de votre adresse ${CYAN}.onion${RESET} est stockée sur le serveur."
+echo -e "  Voler cette clé = usurper votre adresse permanente."
+echo ""
+echo -e "  ${BOLD}Options disponibles :${RESET}"
+echo ""
+
+# Detect TPM 2.0 + systemd-creds
+HAS_TPM2=false
+if { [ -e /dev/tpmrm0 ] || [ -e /dev/tpm0 ]; } && command -v systemd-creds &>/dev/null; then
+  if systemd-creds --tpm2-device=auto encrypt /dev/null /dev/null 2>/dev/null; then
+    HAS_TPM2=true
+  fi
+fi
+
+echo -e "  ${BOLD}1. TPM 2.0 (systemd-creds)${RESET}"
+echo -e "     Cle chiffree par le TPM de la machine. Demarrage auto possible."
+echo -e "     Vol du disque seul = inutilisable."
+if $HAS_TPM2; then
+  echo -e "     ${GREEN}[detecte sur cette machine]${RESET}"
+else
+  echo -e "     ${YELLOW}[non detecte sur cette machine]${RESET}"
+fi
+echo ""
+echo -e "  ${BOLD}2. Passphrase (argon2id + AES-256-GCM)${RESET}"
+echo -e "     Cle chiffree par votre passphrase. ${BOLD}Saisie requise a chaque demarrage.${RESET}"
+echo -e "     ${RED}Le service ne redemarrera PAS automatiquement.${RESET}"
+echo ""
+echo -e "  ${BOLD}3. Plaintext${RESET}  ${RED}[non recommande]${RESET}"
+echo -e "     Cle stockee en clair (chmod 0600). Root peut la lire."
+echo ""
+
+if $HAS_TPM2; then
+  DEFAULT_PROT="1"
+else
+  DEFAULT_PROT="2"
+fi
+
+echo -en "\n  ${BOLD}Choix [${DEFAULT_PROT}]:${RESET} "
+read -r PROT_CHOICE
+PROT_CHOICE="${PROT_CHOICE:-$DEFAULT_PROT}"
+
+KEY_PROTECTION="plaintext"
+ONION_PASSPHRASE=""
+
+case "$PROT_CHOICE" in
+  1)
+    if $HAS_TPM2; then
+      KEY_PROTECTION="tpm"
+      ok "Mode TPM 2.0 selectionne"
+    else
+      warn "TPM 2.0 non disponible -- retour au mode passphrase"
+      PROT_CHOICE=2
+    fi
+    ;;
+esac
+
+if [ "$PROT_CHOICE" = "2" ]; then
+  KEY_PROTECTION="passphrase"
+  echo ""
+  echo -e "  ${BOLD}Choisissez une passphrase pour la cle .onion${RESET}"
+  echo -e "  ${DIM}Requise a chaque demarrage du daemon. Min 12 caracteres.${RESET}"
+  echo -e "  ${YELLOW}Ne la perdez pas -- perte passphrase = perte adresse .onion.${RESET}"
+  echo ""
+  while true; do
+    echo -en "  ${BOLD}Passphrase :${RESET} "
+    read -rs ONION_PASSPHRASE
+    echo ""
+    if [ ${#ONION_PASSPHRASE} -lt 12 ]; then
+      warn "Trop courte (min 12 caracteres). Recommencez."
+      continue
+    fi
+    echo -en "  ${BOLD}Confirmez :${RESET} "
+    read -rs ONION_PASSPHRASE_CONFIRM
+    echo ""
+    if [ "$ONION_PASSPHRASE" = "$ONION_PASSPHRASE_CONFIRM" ]; then
+      unset ONION_PASSPHRASE_CONFIRM
+      ok "Passphrase definie (${#ONION_PASSPHRASE} caracteres)"
+      echo ""
+      warn "Le daemon ne peut PAS demarrer sans cette passphrase."
+      warn "Le service systemd ne redemarrera PAS automatiquement."
+      break
+    else
+      warn "Les passphrases ne correspondent pas. Recommencez."
+    fi
+  done
+fi
+
+if [ "$PROT_CHOICE" = "3" ] || { [ "$PROT_CHOICE" != "1" ] && [ "$PROT_CHOICE" != "2" ]; }; then
+  KEY_PROTECTION="plaintext"
+  warn "Mode PLAINTEXT - la cle onion.key est stockee en clair."
+fi
+
+# ════════════════════════════════════════════════════════════
 #  STEP 4 — Interactive configuration
 # ════════════════════════════════════════════════════════════
 step "ÉTAPE 4 / 5  —  Configuration"
@@ -446,7 +544,14 @@ enabled      = true
 control_net  = "tcp"
 control_addr = "127.0.0.1:9051"
 cookie_auth  = true                    # authentification par cookie (recommandé)
-data_dir     = "${DATA_DIR}/tor"       # clé privée onion.key stockée ici
+data_dir     = "${DATA_DIR}/tor"       # clé privée onion stockée ici
+
+# Protection de la clé .onion à l'arrêt :
+#   "plaintext"  - onion.key en clair (chmod 0600)
+#   "passphrase" - onion.key.enc chiffré argon2id+AES-256-GCM (prompt au démarrage)
+#   "tpm"        - chiffré par systemd-creds + TPM2 (démarrage automatique)
+key_protection = "${KEY_PROTECTION}"
+cred_name      = "onion-key"
 
 [storage]
 db_path = "${DATA_DIR}/mailbox.db"
@@ -478,33 +583,33 @@ step "ÉTAPE 5 / 5  —  Service systemd"
 SETUP_SERVICE=false
 if $HAS_SYSTEMD; then
   echo ""
-  echo -e "  Un service systemd permet de démarrer fialka-mailbox"
-  echo -e "  ${BOLD}automatiquement au boot${RESET} et de le gérer avec :"
+  echo -e "  Un service systemd permet de gérer fialka-mailbox avec :"
   echo -e "  ${DIM}systemctl start|stop|restart|status fialka-mailbox${RESET}"
   echo ""
-  if ask_yn "Installer le service systemd (recommandé) ?" "y"; then
+  if [ "$KEY_PROTECTION" = "passphrase" ]; then
+    warn "Mode passphrase : le service sera installe SANS redemarrage automatique."
+    warn "Demarrage manuel requis a chaque reboot (systemctl start fialka-mailbox)."
+    echo ""
+  fi
+  if ask_yn "Installer le service systemd ?" "y"; then
     SETUP_SERVICE=true
   fi
 else
-  warn "Systemd non disponible sur ce système — service ignoré"
+  warn "Systemd non disponible — service ignoré"
 fi
 
 if $SETUP_SERVICE; then
-  SERVICE_URL="$REPO_RAW/main/deploy/fialka-mailbox.service"
-  info "Téléchargement du fichier service..."
-
-  if curl -fsSL "$SERVICE_URL" -o "$SERVICE_FILE" 2>>"$LOG_FILE"; then
-    # Inject config path
-    sed -i "s|ExecStart=.*|ExecStart=$INSTALL_DIR/fialka start --config $CONFIG_FILE|g" "$SERVICE_FILE"
-    systemctl daemon-reload
-    systemctl enable fialka-mailbox 2>>"$LOG_FILE"
-    ok "Service installé et activé au boot"
-    ok "Fichier service → $SERVICE_FILE"
+  # Adjust Restart policy based on key protection mode
+  if [ "$KEY_PROTECTION" = "passphrase" ]; then
+    SVC_RESTART="no"
   else
-    warn "Impossible de télécharger le fichier service — création locale"
-    cat > "$SERVICE_FILE" << EOF
+    SVC_RESTART="on-failure"
+  fi
+
+  # Build service file inline (no network download needed)
+  cat > "$SERVICE_FILE" << EOF
 [Unit]
-Description=Fialka Mailbox — self-hosted relay
+Description=Fialka Mailbox - self-hosted Tor message relay
 After=network.target tor.service
 Requires=tor.service
 
@@ -513,22 +618,33 @@ Type=simple
 User=fialka
 Group=fialka
 ExecStart=$INSTALL_DIR/fialka start --config $CONFIG_FILE
-Restart=on-failure
+Restart=$SVC_RESTART
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
+ProtectHome=yes
 ReadWritePaths=$DATA_DIR /var/log/fialka-mailbox
+EOF
+
+  # TPM mode: add LoadCredentialEncrypted directive
+  if [ "$KEY_PROTECTION" = "tpm" ]; then
+    echo "LoadCredentialEncrypted=onion-key:${CONFIG_DIR}/onion-key.cred" >> "$SERVICE_FILE"
+  fi
+
+  cat >> "$SERVICE_FILE" << 'EOF'
 
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-    systemctl enable fialka-mailbox 2>>"$LOG_FILE"
-    ok "Service créé localement et activé"
-  fi
+
+  systemctl daemon-reload
+  systemctl enable fialka-mailbox 2>>"$LOG_FILE"
+  ok "Service installe et active → $SERVICE_FILE"
+  [ "$KEY_PROTECTION" = "passphrase" ] && warn "Restart=no — demarrage manuel requis"
+  [ "$KEY_PROTECTION" = "tpm" ] && ok "Restart=on-failure — redemarrage auto (TPM)"
 fi
 
 # ════════════════════════════════════════════════════════════
@@ -537,16 +653,25 @@ fi
 step "Initialisation de la mailbox"
 
 echo ""
-echo -e "  On démarre le daemon brièvement pour :"
-echo -e "    ${CYAN}1.${RESET} Créer le service .onion Tor (adresse permanente)"
-echo -e "    ${CYAN}2.${RESET} Générer le lien d'invitation propriétaire"
+echo -e "  Démarrage temporaire du daemon pour :"
+echo -e "    ${CYAN}1.${RESET} Générer la clé Ed25519 et l'adresse .onion"
+echo -e "    ${CYAN}2.${RESET} Créer le lien d'invitation propriétaire"
 echo ""
 
-info "Démarrage temporaire du daemon (10 secondes)..."
+info "Démarrage du daemon (15 secondes)..."
 set +e
-sudo -u fialka "$INSTALL_DIR/fialka" start --config "$CONFIG_FILE" >> "$LOG_FILE" 2>&1 &
+
+if [ "$KEY_PROTECTION" = "passphrase" ]; then
+  # Pass the passphrase via stdin — it does NOT appear in process arguments or /proc
+  echo "$ONION_PASSPHRASE" | sudo -u fialka "$INSTALL_DIR/fialka" start \
+    --config "$CONFIG_FILE" \
+    --passphrase-stdin \
+    >> "$LOG_FILE" 2>&1 &
+else
+  sudo -u fialka "$INSTALL_DIR/fialka" start --config "$CONFIG_FILE" >> "$LOG_FILE" 2>&1 &
+fi
 FIALKA_PID=$!
-sleep 10
+sleep 15
 
 info "Génération de l'invitation propriétaire..."
 INVITE_OUTPUT=$(sudo -u fialka "$INSTALL_DIR/fialka" mailbox init --config "$CONFIG_FILE" 2>&1 || true)
@@ -558,13 +683,43 @@ set -e
 ONION=$(grep -oP '[a-z2-7]{56}\.onion' <<< "$INVITE_OUTPUT" 2>/dev/null || true)
 INVITE_LINK=$(grep -oP 'fialka://\S+' <<< "$INVITE_OUTPUT" 2>/dev/null || true)
 
+# TPM post-processing: encrypt the freshly generated onion.key with the TPM
+if [ "$KEY_PROTECTION" = "tpm" ]; then
+  substep "Chiffrement de la clé onion avec TPM 2.0 (systemd-creds)..."
+  ONION_KEY_PLAIN="$DATA_DIR/tor/onion.key"
+  ONION_KEY_CRED="$CONFIG_DIR/onion-key.cred"
+  if [ -f "$ONION_KEY_PLAIN" ]; then
+    if systemd-creds encrypt --tpm2-device=auto --name=onion-key \
+        "$ONION_KEY_PLAIN" "$ONION_KEY_CRED" 2>>"$LOG_FILE"; then
+      shred -u "$ONION_KEY_PLAIN" 2>/dev/null || rm -f "$ONION_KEY_PLAIN"
+      chown root:root "$ONION_KEY_CRED"
+      chmod 600 "$ONION_KEY_CRED"
+      ok "Cle chiffree par TPM → $ONION_KEY_CRED"
+      ok "Cle plaintext detruite de maniere securisee"
+    else
+      warn "Chiffrement TPM echoue — cle plaintext conservee (verifie /dev/tpmrm*)"
+    fi
+  else
+    warn "onion.key introuvable — le daemon n'a peut-etre pas demarre correctement"
+    warn "Verifie les logs : $LOG_FILE"
+  fi
+fi
+
+# Zero passphrase from bash memory
+ONION_PASSPHRASE=""
+unset ONION_PASSPHRASE
+
 # ════════════════════════════════════════════════════════════
 #  START now ?
 # ════════════════════════════════════════════════════════════
 START_NOW=false
 if $SETUP_SERVICE; then
   echo ""
-  if ask_yn "Démarrer fialka-mailbox maintenant (via systemd) ?" "y"; then
+  if [ "$KEY_PROTECTION" = "passphrase" ]; then
+    info "Mode passphrase — demarrage manuel requis depuis un terminal :"
+    echo -e "    ${CYAN}sudo systemctl start fialka-mailbox${RESET}"
+    echo -e "  ${DIM}(systemd-ask-password vous demandera la passphrase)${RESET}"
+  elif ask_yn "Démarrer fialka-mailbox maintenant (via systemd) ?" "y"; then
     START_NOW=true
     systemctl start fialka-mailbox 2>>"$LOG_FILE"
     sleep 3
@@ -572,8 +727,7 @@ if $SETUP_SERVICE; then
     if [ "$SVC_STATUS" = "active" ]; then
       ok "Service fialka-mailbox démarré et actif"
     else
-      warn "Service démarré mais statut : $SVC_STATUS"
-      warn "Vérifiez les logs : journalctl -u fialka-mailbox -n 50"
+      warn "Statut : $SVC_STATUS — vérifiez : journalctl -u fialka-mailbox -n 50"
     fi
   fi
 else
@@ -610,7 +764,33 @@ echo -e "    ✓  Tor ${CYAN}(The Tor Project — GPG vérifié)${RESET}"
 echo -e "    ✓  fialka-mailbox ${BOLD}${VERSION}${RESET}  →  $INSTALL_DIR/fialka"
 echo -e "    ✓  Configuration  →  $CONFIG_FILE"
 echo -e "    ✓  Données        →  $DATA_DIR"
-$SETUP_SERVICE && echo -e "    ✓  Service        →  fialka-mailbox.service (auto-start au boot)"
+$SETUP_SERVICE && echo -e "    ✓  Service        →  fialka-mailbox.service"
+echo ""
+
+hr
+echo -e "  ${BOLD}Protection de la clé .onion${RESET}"
+hr
+case "$KEY_PROTECTION" in
+  tpm)
+    echo -e "    ${GREEN}✓${RESET}  ${BOLD}TPM 2.0 (systemd-creds)${RESET}"
+    echo -e "    ${DIM}  Redémarrage automatique : OUI${RESET}"
+    [ -f "$CONFIG_DIR/onion-key.cred" ] && echo -e "    ${DIM}  Credential : $CONFIG_DIR/onion-key.cred${RESET}"
+    ;;
+  passphrase)
+    echo -e "    ${YELLOW}✓${RESET}  ${BOLD}Passphrase (argon2id + AES-256-GCM)${RESET}"
+    echo -e "    ${YELLOW}  Saisie requise à chaque démarrage${RESET}"
+    echo -e "    ${RED}  Redémarrage automatique : NON${RESET}"
+    echo -e "    ${DIM}  Clé : $DATA_DIR/tor/onion.key.enc${RESET}"
+    echo ""
+    echo -e "  ${YELLOW}${BOLD}Pour démarrer (mode passphrase) :${RESET}"
+    echo -e "    ${CYAN}sudo systemctl start fialka-mailbox${RESET}"
+    echo -e "  ${DIM}  (systemd-ask-password vous demandera la passphrase)${RESET}"
+    ;;
+  *)
+    echo -e "    ${RED}!${RESET}  ${BOLD}Plaintext${RESET} ${RED}(non recommandé)${RESET}"
+    echo -e "    ${DIM}  Clé : $DATA_DIR/tor/onion.key (chmod 0600)${RESET}"
+    ;;
+esac
 echo ""
 
 if [ -n "$ONION" ]; then

@@ -809,9 +809,13 @@ if [ -n "$INVITE_LINK" ]; then
   echo ""
   echo -e "    ${YELLOW}${INVITE_LINK}${RESET}"
   echo ""
-  echo -e "  ${DIM}Ce lien permet à la première personne de rejoindre la mailbox${RESET}"
-  echo -e "  ${DIM}en tant que PROPRIÉTAIRE. Après ça, utilisez l'app Fialka pour${RESET}"
-  echo -e "  ${DIM}inviter des membres.${RESET}"
+  echo -e "  ${RED}${BOLD}⚠  Ce lien est OBLIGATOIRE pour rejoindre la mailbox.${RESET}"
+  echo -e "  ${DIM}  Sans lui, aucune connexion ne sera acceptée par le serveur.${RESET}"
+  echo -e "  ${DIM}  La première personne à l'utiliser devient PROPRIÉTAIRE.${RESET}"
+  echo -e "  ${DIM}  Après ça, utilisez l'app Fialka pour inviter des membres.${RESET}"
+  echo ""
+  echo -e "  ${DIM}  Pour régénérer ce lien si perdu :${RESET}"
+  echo -e "    ${CYAN}fialka mailbox init --config $CONFIG_FILE${RESET}"
   echo ""
 fi
 
@@ -1193,8 +1197,22 @@ echo -e "    ✓ Data    → ${DATA_DIR}"
 [ -f "$SERVICE_FILE" ] && echo -e "    ✓ Service → fialka-mailbox.service"
 echo ""
 if [ -n "$INVITE_OUTPUT" ]; then
+  INVITE_LINK_EN=$(grep -oP 'fialka://\S+' <<< "$INVITE_OUTPUT" 2>/dev/null || true)
   echo -e "  ${BOLD}Owner invite link:${RESET}"
-  echo "$INVITE_OUTPUT" | grep -E "fialka://|Invite|invite" | sed 's/^/    /'
+  echo ""
+  if [ -n "$INVITE_LINK_EN" ]; then
+    echo -e "    ${YELLOW}${INVITE_LINK_EN}${RESET}"
+  else
+    echo "$INVITE_OUTPUT" | grep -E "fialka://|Invite|invite" | sed 's/^/    /'
+  fi
+  echo ""
+  echo -e "  ${RED}${BOLD}⚠  This link is MANDATORY to join the mailbox.${RESET}"
+  echo -e "  ${DIM}  Without it, no connection will be accepted by the server.${RESET}"
+  echo -e "  ${DIM}  The first person to use it becomes the OWNER.${RESET}"
+  echo -e "  ${DIM}  After that, use the Fialka app to invite members.${RESET}"
+  echo ""
+  echo -e "  ${DIM}  To regenerate this link if lost:${RESET}"
+  echo -e "    ${CYAN}fialka mailbox init --config $CONFIG_FILE${RESET}"
   echo ""
 fi
 echo -e "  ${BOLD}Start now:${RESET}"

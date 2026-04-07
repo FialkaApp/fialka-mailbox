@@ -31,4 +31,5 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(mailboxCmd)
+	rootCmd.AddCommand(uninstallCmd)
 }

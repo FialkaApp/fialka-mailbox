@@ -44,11 +44,11 @@ const (
 )
 
 const (
-	magicHigh      byte  = 0xF1
-	magicLow       byte  = 0xA1
-	maxPayloadSize int   = 10 * 1024 * 1024 // 10 MB
-	authHeaderSize int   = 32 + 8 + 16 + 64 // pubkey + timestamp + nonce + sig = 120 bytes
-	timestampWindowMs int64 = 30 * 60 * 1000 // ±30 minutes in ms (matches Android TIMESTAMP_WINDOW_MS)
+	magicHigh         byte  = 0xF1
+	magicLow          byte  = 0xA1
+	maxPayloadSize    int   = 10 * 1024 * 1024 // 10 MB
+	authHeaderSize    int   = 32 + 8 + 16 + 64 // pubkey + timestamp + nonce + sig = 120 bytes
+	timestampWindowMs int64 = 30 * 60 * 1000   // ±30 minutes in ms (matches Android TIMESTAMP_WINDOW_MS)
 )
 
 // Frame is a single TorTransport protocol message.

@@ -23,13 +23,13 @@ type ServerConfig struct {
 }
 
 type TorConfig struct {
-	Enabled    bool   `mapstructure:"enabled"`
-	TorBinary  string `mapstructure:"tor_binary"`
-	DataDir    string `mapstructure:"data_dir"`
-	ControlNet string `mapstructure:"control_net"`
+	Enabled     bool   `mapstructure:"enabled"`
+	TorBinary   string `mapstructure:"tor_binary"`
+	DataDir     string `mapstructure:"data_dir"`
+	ControlNet  string `mapstructure:"control_net"`
 	ControlAddr string `mapstructure:"control_addr"`
-	CookieAuth bool   `mapstructure:"cookie_auth"`
-	Password   string `mapstructure:"password"`
+	CookieAuth  bool   `mapstructure:"cookie_auth"`
+	Password    string `mapstructure:"password"`
 }
 
 type StorageConfig struct {

@@ -60,7 +60,7 @@ func Load(path string) (*Config, error) {
 	v := viper.New()
 
 	// Defaults
-	v.SetDefault("server.listen", "127.0.0.1:8765")
+	v.SetDefault("server.listen", "127.0.0.1:7333") // port 7333 = Android HIDDEN_SERVICE_PORT
 	v.SetDefault("server.expose_direct", false)
 	v.SetDefault("tor.enabled", true)
 	v.SetDefault("tor.control_net", "tcp")

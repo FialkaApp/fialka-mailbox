@@ -21,10 +21,11 @@ var setupCmd = &cobra.Command{
 }
 
 func runSetup() error {
-	fmt.Println("\n  Fialka Mailbox — Setup Wizard\n")
+	fmt.Println("\n  Fialka Mailbox — Setup Wizard")
+	fmt.Println()
 
 	cfg := &config.Config{
-		Server:  config.ServerConfig{Listen: "127.0.0.1:8765"},
+		Server:  config.ServerConfig{Listen: "127.0.0.1:7333"},
 		Tor:     config.TorConfig{Enabled: true, ControlNet: "tcp", ControlAddr: "127.0.0.1:9051", CookieAuth: true},
 		Storage: config.StorageConfig{},
 		Limits: config.LimitsConfig{

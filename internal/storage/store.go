@@ -4,11 +4,12 @@ package storage
 // The server never inspects Payload — it is opaque ciphertext.
 type Message struct {
 	ID         string // UUID
-	Recipient  string // SHA-256 hash of recipient Ed25519 pubkey
+	Recipient  string // base64(raw 32-byte Ed25519 pubkey) — matches Android recipientPubKey
+	Sender     string // base64(raw 32-byte Ed25519 pubkey) — needed for FETCH_RESP format
 	Payload    []byte // encrypted blob (opaque to the server)
 	SizeBytes  int64
-	ReceivedAt int64 // unix timestamp
-	ExpiresAt  int64 // unix timestamp (TTL)
+	ReceivedAt int64 // unix timestamp (seconds)
+	ExpiresAt  int64 // unix timestamp (seconds, TTL)
 }
 
 // Member is a registered mailbox participant.
@@ -34,9 +35,10 @@ type Invite struct {
 
 // Store is the message storage interface.
 // Implementations: SQLiteStore (default), in-memory (tests).
+// Fetch accepts base64(raw 32-byte Ed25519 pubkey) as the recipient identifier.
 type Store interface {
 	Deposit(msg *Message) error
-	Fetch(recipientHash string) ([]*Message, error)
+	Fetch(recipientPubKeyB64 string) ([]*Message, error)
 	Delete(id string) error
 	Expire() (int, error)
 	Stats() (*Stats, error)

@@ -593,7 +593,9 @@ func mbBuildLink(onion, token string) string {
 	if onion == "" {
 		onion = "<start-daemon-first>"
 	}
-	return fmt.Sprintf("fialka-mailbox://%s/join/%s", onion, token)
+	// Matches Android MailboxClientManager.buildMailboxLink() deep-link format:
+	// fialka://mailbox?onion=<onion>&type=PRIVATE&invite=<token>
+	return fmt.Sprintf("fialka://mailbox?onion=%s&type=PRIVATE&invite=%s", onion, token)
 }
 
 func mbPrintInvite(inv *storage.Invite, link string) {

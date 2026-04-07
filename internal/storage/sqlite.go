@@ -18,6 +18,7 @@ const schema = `
 CREATE TABLE IF NOT EXISTS messages (
 	id           TEXT PRIMARY KEY,
 	recipient    TEXT NOT NULL,
+	sender       TEXT NOT NULL DEFAULT '',
 	payload      BLOB NOT NULL,
 	size_bytes   INTEGER NOT NULL,
 	received_at  INTEGER NOT NULL,
@@ -67,6 +68,9 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("creating schema: %w", err)
 	}
 
+	// Migration: add sender column if missing (for existing DBs from prior versions)
+	_, _ = db.Exec(`ALTER TABLE messages ADD COLUMN sender TEXT NOT NULL DEFAULT ''`)
+
 	return &SQLiteStore{db: db}, nil
 }
 
@@ -81,9 +85,9 @@ func (s *SQLiteStore) Deposit(msg *Message) error {
 	}
 
 	_, err := s.db.Exec(
-		`INSERT INTO messages (id, recipient, payload, size_bytes, received_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.Recipient, msg.Payload, msg.SizeBytes, msg.ReceivedAt, msg.ExpiresAt,
+		`INSERT INTO messages (id, recipient, sender, payload, size_bytes, received_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.Recipient, msg.Sender, msg.Payload, msg.SizeBytes, msg.ReceivedAt, msg.ExpiresAt,
 	)
 	if err != nil {
 		return fmt.Errorf("deposit: %w", err)
@@ -92,14 +96,15 @@ func (s *SQLiteStore) Deposit(msg *Message) error {
 }
 
 // Fetch returns all non-expired messages for a recipient, ordered oldest first.
-func (s *SQLiteStore) Fetch(recipientHash string) ([]*Message, error) {
+// recipientPubKeyB64 is base64(raw 32-byte Ed25519 pubkey), matching what Deposit stores.
+func (s *SQLiteStore) Fetch(recipientPubKeyB64 string) ([]*Message, error) {
 	now := time.Now().Unix()
 	rows, err := s.db.Query(
-		`SELECT id, recipient, payload, size_bytes, received_at, expires_at
+		`SELECT id, recipient, sender, payload, size_bytes, received_at, expires_at
          FROM messages
          WHERE recipient = ? AND expires_at > ?
          ORDER BY received_at ASC`,
-		recipientHash, now,
+		recipientPubKeyB64, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("fetch query: %w", err)
@@ -109,7 +114,7 @@ func (s *SQLiteStore) Fetch(recipientHash string) ([]*Message, error) {
 	var msgs []*Message
 	for rows.Next() {
 		m := &Message{}
-		if err := rows.Scan(&m.ID, &m.Recipient, &m.Payload, &m.SizeBytes, &m.ReceivedAt, &m.ExpiresAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Recipient, &m.Sender, &m.Payload, &m.SizeBytes, &m.ReceivedAt, &m.ExpiresAt); err != nil {
 			return nil, fmt.Errorf("fetch scan: %w", err)
 		}
 		msgs = append(msgs, m)

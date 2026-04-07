@@ -2,17 +2,16 @@ package cmd
 
 import (
 	"context"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/fialkaapp/fialka-mailbox/internal/api"
 	"github.com/fialkaapp/fialka-mailbox/internal/config"
 	"github.com/fialkaapp/fialka-mailbox/internal/storage"
 	"github.com/fialkaapp/fialka-mailbox/internal/tor"
+	"github.com/fialkaapp/fialka-mailbox/internal/transport"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -115,7 +114,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 	}
 
-	log.Info().Str("version", "0.1.0").Msg("Fialka Mailbox starting")
+	log.Info().Str("version", "0.2.0").Msg("Fialka Mailbox starting")
 
 	// Open storage
 	store, err := storage.NewSQLiteStore(cfg.Storage.DBPath)
@@ -143,18 +142,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Build HTTP handler
-	handler := api.NewHandler(store, cfg, log.Logger)
-
-	srv := &http.Server{
-		Addr:         cfg.Server.Listen,
-		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	// Graceful shutdown on SIGINT/SIGTERM
+	// Graceful shutdown context
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -163,14 +151,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 		<-sigCh
 		log.Info().Msg("shutting down…")
-		shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer shutCancel()
-		srv.Shutdown(shutCtx) //nolint:errcheck
 		cancel()
 	}()
 
-	log.Info().Str("addr", cfg.Server.Listen).Msg("HTTP server listening")
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	// Start TorTransport TCP server on port 7333
+	// Android always connects to port 7333 (HIDDEN_SERVICE_PORT).
+	// Tor maps external:7333 → 127.0.0.1:7333 via ADD_ONION.
+	srv := transport.New(store, cfg, log.Logger)
+	if err := srv.ListenAndServe(ctx, cfg.Server.Listen); err != nil {
 		return err
 	}
 
@@ -213,8 +201,9 @@ func connectTor(cfg *config.Config) (*tor.Controller, error) {
 		return nil, err
 	}
 
-	// Map the hidden service port 80 → internal listen addr
-	if err := ctrl.CreateHiddenService(80, cfg.Server.Listen); err != nil {
+	// Map hidden service port 7333 → local TCP server (cfg.Server.Listen = 127.0.0.1:7333)
+	// Android HIDDEN_SERVICE_PORT = 7333 — must match exactly.
+	if err := ctrl.CreateHiddenService(7333, cfg.Server.Listen); err != nil {
 		ctrl.Close()
 		return nil, err
 	}

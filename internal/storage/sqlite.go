@@ -25,6 +25,29 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient);
 CREATE INDEX IF NOT EXISTS idx_messages_expires_at ON messages(expires_at);
+
+CREATE TABLE IF NOT EXISTS members (
+	pubkey_hash  TEXT PRIMARY KEY,
+	pubkey       BLOB NOT NULL,
+	role         TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner','member')),
+	display_name TEXT NOT NULL DEFAULT '',
+	joined_at    INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS invites (
+	token      TEXT PRIMARY KEY,
+	role       TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner','member')),
+	created_by TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL DEFAULT 0,
+	max_uses   INTEGER NOT NULL DEFAULT 1,
+	use_count  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS server_meta (
+	key   TEXT PRIMARY KEY,
+	value TEXT NOT NULL DEFAULT ''
+);
 `
 
 // NewSQLiteStore opens (or creates) the SQLite database at dbPath.

@@ -136,6 +136,8 @@ func runStart(cmd *cobra.Command, args []string) error {
 			log.Warn().Err(err).Msg("Tor unavailable — running without hidden service")
 		} else {
 			defer torCtrl.Close()
+			// Persist onion address for invite links and CLI commands
+			_ = store.SetMeta("onion_address", torCtrl.OnionAddress)
 			log.Info().Str("onion", torCtrl.OnionAddress).Msg("hidden service ready")
 			log.Info().Msg(torCtrl.OnionAddressQR())
 		}

@@ -28,10 +28,24 @@ type Server struct {
 func NewHandler(store *storage.SQLiteStore, cfg *config.Config, logger zerolog.Logger) http.Handler {
 	s := &Server{store: store, cfg: cfg, logger: logger}
 	mux := http.NewServeMux()
+
+	// Health & info
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /mailbox/info", s.handleMailboxInfo)
+
+	// Inbox (message relay)
 	mux.HandleFunc("POST /inbox/{pubkeyHash}", s.handleDeposit)
 	mux.HandleFunc("GET /inbox/{pubkeyHash}", s.handleFetch)
 	mux.HandleFunc("DELETE /inbox/{pubkeyHash}/{msgID}", s.handleAck)
+
+	// Membership management
+	mux.HandleFunc("POST /mailbox/join", s.handleJoin)
+	mux.HandleFunc("POST /mailbox/invite", s.handleCreateInvite)
+	mux.HandleFunc("GET /mailbox/invites", s.handleListInvites)
+	mux.HandleFunc("DELETE /mailbox/invites/{token}", s.handleRevokeInvite)
+	mux.HandleFunc("GET /mailbox/members", s.handleListMembers)
+	mux.HandleFunc("DELETE /mailbox/members/{hash}", s.handleKickMember)
+
 	return mux
 }
 

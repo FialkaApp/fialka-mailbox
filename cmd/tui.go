@@ -210,14 +210,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel()
 			return m, tea.Quit
 
-		// Viewport navigation (when not editing input — always available)
+		// Viewport navigation — handled manually (viewport never gets KeyMsg directly)
 		case tea.KeyPgUp:
 			if m.ready {
-				m.viewport.ViewUp()
+				var vpCmd tea.Cmd
+				m.viewport, vpCmd = m.viewport.Update(msg)
+				cmds = append(cmds, vpCmd)
 			}
 		case tea.KeyPgDown:
 			if m.ready {
-				m.viewport.ViewDown()
+				var vpCmd tea.Cmd
+				m.viewport, vpCmd = m.viewport.Update(msg)
+				cmds = append(cmds, vpCmd)
 			}
 		case tea.KeyEnd:
 			if m.ready {
@@ -250,11 +254,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Let viewport handle its own internal events (scrollbar, mouse)
+	// Forward non-key messages to viewport (log updates, window resize, mouse).
+	// Key messages are handled above — never pass them to the viewport or it
+	// will intercept PgUp/PgDown/Enter before the input does.
 	if m.ready {
-		var vpCmd tea.Cmd
-		m.viewport, vpCmd = m.viewport.Update(msg)
-		cmds = append(cmds, vpCmd)
+		if _, isKey := msg.(tea.KeyMsg); !isKey {
+			var vpCmd tea.Cmd
+			m.viewport, vpCmd = m.viewport.Update(msg)
+			cmds = append(cmds, vpCmd)
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -290,14 +298,16 @@ func (m tuiModel) View() string {
 		tuiDimStyle.Render(tuiFormatBytes(m.sizeBytes)),
 	)
 
-	// ── Command result (one line, always reserved) ────────────────────────────
-	resultLine := ""
+	// ── Command result (one line, ALWAYS 1 row — never collapse to 0) ────────
+	var resultLine string
 	if m.cmdResult != "" {
 		style := tuiWarnStyle
 		if m.cmdIsErr {
 			style = tuiErrStyle
 		}
 		resultLine = style.Render("  " + m.cmdResult)
+	} else {
+		resultLine = " " // reserve the row so layout never shifts
 	}
 
 	// ── Assemble ──────────────────────────────────────────────────────────────

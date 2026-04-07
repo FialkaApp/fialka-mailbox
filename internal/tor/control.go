@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -69,19 +68,24 @@ func (c *Controller) authenticate(password, dataDir string, cookieAuth bool) err
 }
 
 func (c *Controller) getCookiePath() (string, error) {
-	if err := c.write("GETINFO config-file\r\n"); err != nil {
+	// PROTOCOLINFO is the only Tor control command allowed before authentication.
+	// GETINFO would return 514 and cause Tor to close the connection.
+	if err := c.write("PROTOCOLINFO 1\r\n"); err != nil {
 		return "", err
 	}
-	// Read lines until 250 OK
-	var torrcPath string
+	var cookieFile string
 	for {
 		line, err := c.reader.ReadString('\n')
 		if err != nil {
 			return "", err
 		}
 		line = strings.TrimRight(line, "\r\n")
-		if strings.HasPrefix(line, "250-config-file=") {
-			torrcPath = strings.TrimPrefix(line, "250-config-file=")
+		// 250-AUTH METHODS=COOKIE,SAFECOOKIE COOKIEFILE="/run/tor/control.authcookie"
+		if strings.HasPrefix(line, "250-AUTH") && strings.Contains(line, "COOKIEFILE=") {
+			parts := strings.SplitN(line, "COOKIEFILE=", 2)
+			if len(parts) == 2 {
+				cookieFile = strings.Trim(parts[1], "\"")
+			}
 		}
 		if strings.HasPrefix(line, "250 ") {
 			break
@@ -91,10 +95,9 @@ func (c *Controller) getCookiePath() (string, error) {
 		}
 	}
 
-	if torrcPath != "" {
-		cookiePath := filepath.Join(filepath.Dir(torrcPath), "control_auth_cookie")
-		if _, err := os.Stat(cookiePath); err == nil {
-			return cookiePath, nil
+	if cookieFile != "" {
+		if _, err := os.Stat(cookieFile); err == nil {
+			return cookieFile, nil
 		}
 	}
 

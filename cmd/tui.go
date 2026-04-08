@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fialkaapp/fialka-mailbox/internal/storage"
 )
+
+// ── Log colorizer ─────────────────────────────────────────────────────────────
+
+func tuiColorizeLog(line string) string {
+	switch {
+	case strings.Contains(line, " ERR "), strings.Contains(line, " FTL "):
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).Render(line)
+	case strings.Contains(line, " WRN "):
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#fbbf24")).Render(line)
+	default:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render(line)
+	}
+}
 
 // ── External log writer (zerolog → channel) ────────────────────────────────────
 
@@ -86,56 +100,54 @@ func tuiScheduleStats(store *storage.SQLiteStore) tea.Cmd {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 var (
-	tuiTitleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#e2e8f0"))
-	tuiAccStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#10b981"))
-	tuiOnionStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa"))
-	tuiDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#6b7280"))
-	tuiWarnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#fbbf24"))
-	tuiErrStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171"))
-	tuiPromptStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#10b981"))
+	tuiBrandStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#f8fafc"))
+	tuiVerStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#10b981"))
+	tuiDotStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#10b981"))
+	tuiUptimeStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#10b981"))
+	tuiStatNumStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#e2e8f0"))
+	tuiStatLblStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#475569"))
+	tuiOnionStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#a78bfa"))
+	tuiThickSep     = lipgloss.NewStyle().Foreground(lipgloss.Color("#10b981"))
+	tuiThinSep      = lipgloss.NewStyle().Foreground(lipgloss.Color("#1e293b"))
+	tuiCmdOkStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#34d399"))
+	tuiCmdErrStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171"))
+	tuiPromptStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#10b981"))
+	tuiErrStyle     = tuiCmdErrStyle
 )
 
-// Layout constants (number of terminal rows used by fixed UI elements).
+// Fixed rows: title + ━sep + onion + ─sep + ─sep + prompt = 6
 const (
-	tuiHeaderH  = 3 // title row + onion row + separator
-	tuiFooterH  = 5 // separator + stats + separator + cmdResult + prompt
-	tuiMaxLines = 1000
+	tuiFixedRows = 6
+	tuiMaxLines  = 1000
 )
 
 // ── Model ─────────────────────────────────────────────────────────────────────
 
 type tuiModel struct {
-	// server handles
 	store     *storage.SQLiteStore
 	cancel    func()
 	logCh     <-chan string
 	onionAddr string
 	startTime time.Time
+	cfgPath   string // for config/logs commands
 
-	// stats
 	memberCount int
 	pendingMsgs int64
 	sizeBytes   int64
 
-	// UI components
 	viewport viewport.Model
 	input    textinput.Model
 	ready    bool
 	width    int
 	height   int
 
-	// log buffer
-	logLines []string
-
-	// command feedback (one-line, shown above prompt)
-	cmdResult string
-	cmdIsErr  bool
+	logLines []string // pre-colored rendered lines
 }
 
-func newTUIModel(onionAddr string, store *storage.SQLiteStore, cancel func(), logCh <-chan string) tuiModel {
+func newTUIModel(onionAddr string, store *storage.SQLiteStore, cancel func(), logCh <-chan string, cfgPath string) tuiModel {
 	ti := textinput.New()
-	ti.Placeholder = "help · members · invite · status · quit"
-	ti.Prompt = "❯ "
+	ti.Placeholder = "help  members  invite  status  quit"
+	ti.Prompt = "  ❯ "
 	ti.PromptStyle = tuiPromptStyle
 	ti.CharLimit = 200
 	ti.Focus()
@@ -146,6 +158,7 @@ func newTUIModel(onionAddr string, store *storage.SQLiteStore, cancel func(), lo
 		store:     store,
 		cancel:    cancel,
 		logCh:     logCh,
+		cfgPath:   cfgPath,
 		input:     ti,
 	}
 }
@@ -166,9 +179,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		vpH := msg.Height - tuiHeaderH - tuiFooterH
-		if vpH < 3 {
-			vpH = 3
+		vpH := msg.Height - tuiFixedRows
+		if vpH < 1 {
+			vpH = 1
 		}
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, vpH)
@@ -181,7 +194,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tuiLogLineMsg:
-		m.logLines = append(m.logLines, string(msg))
+		m.logLines = append(m.logLines, tuiColorizeLog(string(msg)))
 		if len(m.logLines) > tuiMaxLines {
 			m.logLines = m.logLines[len(m.logLines)-tuiMaxLines:]
 		}
@@ -237,13 +250,23 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.SetValue("")
 			if raw != "" {
 				result, isErr, quit := m.execCommand(raw)
-				m.cmdResult = result
-				m.cmdIsErr = isErr
 				if quit {
 					m.cancel()
 					return m, tea.Quit
 				}
-				// Refresh stats after any command that might change state
+				if result != "" {
+					var rendered string
+					if isErr {
+						rendered = tuiCmdErrStyle.Render("  ✗ " + result)
+					} else {
+						rendered = tuiCmdOkStyle.Render("  ◀ " + result)
+					}
+					m.logLines = append(m.logLines, rendered)
+					if m.ready {
+						m.viewport.SetContent(strings.Join(m.logLines, "\n"))
+						m.viewport.GotoBottom()
+					}
+				}
 				cmds = append(cmds, tuiFetchStats(m.store))
 			}
 
@@ -274,53 +297,46 @@ func (m tuiModel) View() string {
 	}
 
 	w := m.width
-	uptime := time.Since(m.startTime).Round(time.Second)
+	uptime := tuiFormatUptime(time.Since(m.startTime).Round(time.Second))
 
-	// ── Header (3 lines) ──────────────────────────────────────────────────────
-	titleLine := tuiTitleStyle.Render("  🔐 FIALKA MAILBOX ") +
-		tuiAccStyle.Render("v0.2.0") +
-		tuiDimStyle.Render("  ●  UP ") +
-		tuiAccStyle.Render(tuiFormatUptime(uptime))
+	// ── Title line: brand left | stats right ──────────────────────────────────
+	left := tuiBrandStyle.Render("  🔐 FIALKA MAILBOX ") +
+		tuiVerStyle.Render("v0.2.0") +
+		tuiDotStyle.Render("  ●  UP ") +
+		tuiUptimeStyle.Render(uptime)
 
+	right := tuiStatNumStyle.Render(strconv.Itoa(m.memberCount)) +
+		tuiStatLblStyle.Render(" members  ·  ") +
+		tuiStatNumStyle.Render(strconv.FormatInt(m.pendingMsgs, 10)) +
+		tuiStatLblStyle.Render(" msgs  ·  ") +
+		tuiStatLblStyle.Render(tuiFormatBytes(m.sizeBytes)) + "  "
+
+	pad := w - lipgloss.Width(left) - lipgloss.Width(right)
+	if pad < 1 {
+		pad = 1
+	}
+	titleLine := left + strings.Repeat(" ", pad) + right
+
+	// ── Separators ────────────────────────────────────────────────────────────
+	thickSep := tuiThickSep.Render(strings.Repeat("━", w))
+	thinSep := tuiThinSep.Render(strings.Repeat("─", w))
+
+	// ── Onion line ────────────────────────────────────────────────────────────
 	var onionLine string
 	if m.onionAddr != "" {
-		onionLine = "  " + tuiOnionStyle.Render(m.onionAddr)
+		onionLine = tuiOnionStyle.Render("  " + m.onionAddr)
 	} else {
-		onionLine = "  " + tuiDimStyle.Render("(Tor unavailable — server running without .onion)")
+		onionLine = tuiStatLblStyle.Render("  Tor unavailable — no .onion address")
 	}
 
-	sep := tuiDimStyle.Render(strings.Repeat("─", w))
-
-	// ── Stats line ────────────────────────────────────────────────────────────
-	statsLine := fmt.Sprintf("  %s members  ·  %s pending msgs  ·  %s",
-		tuiAccStyle.Render(strconv.Itoa(m.memberCount)),
-		tuiAccStyle.Render(strconv.FormatInt(m.pendingMsgs, 10)),
-		tuiDimStyle.Render(tuiFormatBytes(m.sizeBytes)),
-	)
-
-	// ── Command result (one line, ALWAYS 1 row — never collapse to 0) ────────
-	var resultLine string
-	if m.cmdResult != "" {
-		style := tuiWarnStyle
-		if m.cmdIsErr {
-			style = tuiErrStyle
-		}
-		resultLine = style.Render("  " + m.cmdResult)
-	} else {
-		resultLine = " " // reserve the row so layout never shifts
-	}
-
-	// ── Assemble ──────────────────────────────────────────────────────────────
 	return lipgloss.JoinVertical(lipgloss.Left,
-		titleLine,           // 1
-		onionLine,           // 2
-		sep,                 // 3
-		m.viewport.View(),   // vpH lines
-		sep,                 // +1
-		statsLine,           // +1
-		sep,                 // +1
-		resultLine,          // +1
-		"  "+m.input.View(), // +1
+		titleLine,
+		thickSep,
+		onionLine,
+		thinSep,
+		m.viewport.View(),
+		thinSep,
+		m.input.View(),
 	)
 }
 
@@ -336,31 +352,169 @@ func (m *tuiModel) execCommand(raw string) (result string, isErr bool, quit bool
 
 	switch cmd {
 
+	// ── help ─────────────────────────────────────────────────────────────────
 	case "help", "h", "?":
-		return "Commands: help · members · invite [days=7] · status · clear · quit", false, false
+		lines := []string{
+			"  Available commands:",
+			"    status               — server stats",
+			"    members              — list members",
+			"    kick <hash>          — remove a member (prefix ok)",
+			"    init                 — create owner bootstrap invite",
+			"    invite [days=7]      — create a member invite link",
+			"    invites              — list all active invites",
+			"    revoke <token>       — revoke an invite (prefix ok)",
+			"    config               — show config file path",
+			"    logs                 — show log file path",
+			"    clear                — clear viewport",
+			"    quit                 — stop server and exit",
+		}
+		for _, l := range lines {
+			m.logLines = append(m.logLines, tuiCmdOkStyle.Render(l))
+		}
+		if m.ready {
+			m.viewport.SetContent(strings.Join(m.logLines, "\n"))
+			m.viewport.GotoBottom()
+		}
+		return "", false, false
 
+	// ── status ───────────────────────────────────────────────────────────────
+	case "status":
+		stats, err := m.store.Stats()
+		if err != nil {
+			return "error: " + err.Error(), true, false
+		}
+		onion, _ := m.store.GetMeta("onion_address")
+		if onion == "" {
+			onion = "(not set)"
+		}
+		lines := []string{
+			fmt.Sprintf("  onion    : %s", onion),
+			fmt.Sprintf("  pending  : %d messages", stats.PendingMessages),
+			fmt.Sprintf("  inboxes  : %d recipients", stats.Recipients),
+			fmt.Sprintf("  storage  : %s", tuiFormatBytes(stats.TotalSizeBytes)),
+			fmt.Sprintf("  uptime   : %s", tuiFormatUptime(time.Since(m.startTime).Round(time.Second))),
+		}
+		for _, l := range lines {
+			m.logLines = append(m.logLines, tuiCmdOkStyle.Render(l))
+		}
+		if m.ready {
+			m.viewport.SetContent(strings.Join(m.logLines, "\n"))
+			m.viewport.GotoBottom()
+		}
+		return "", false, false
+
+	// ── members ───────────────────────────────────────────────────────────────
 	case "members", "list", "ls":
 		members, err := m.store.ListMembers()
 		if err != nil {
 			return "error: " + err.Error(), true, false
 		}
 		if len(members) == 0 {
-			return "No members yet — run: fialka mailbox init", false, false
+			return "no members yet — run: init", false, false
 		}
-		rows := make([]string, 0, len(members))
 		for i, mem := range members {
 			hash := mem.PubkeyHash
-			if len(hash) > 16 {
-				hash = hash[:8] + "…" + hash[len(hash)-8:]
+			if len(hash) > 32 {
+				hash = hash[:16] + "…" + hash[len(hash)-8:]
+			}
+			name := mem.DisplayName
+			if name == "" {
+				name = "(unnamed)"
 			}
 			role := ""
 			if mem.Role == "owner" {
 				role = " [owner]"
 			}
-			rows = append(rows, fmt.Sprintf("[%d] %s%s", i+1, hash, role))
+			joined := time.Unix(mem.JoinedAt, 0).Format("2006-01-02")
+			line := fmt.Sprintf("  [%d] %-18s  %-14s  %s%s", i+1, hash, name, joined, role)
+			m.logLines = append(m.logLines, tuiCmdOkStyle.Render(line))
 		}
-		return strings.Join(rows, "  "), false, false
+		if m.ready {
+			m.viewport.SetContent(strings.Join(m.logLines, "\n"))
+			m.viewport.GotoBottom()
+		}
+		return "", false, false
 
+	// ── kick ──────────────────────────────────────────────────────────────────
+	case "kick", "remove", "rm":
+		if len(args) == 0 {
+			return "usage: kick <hash_prefix>", true, false
+		}
+		prefix := args[0]
+		members, err := m.store.ListMembers()
+		if err != nil {
+			return "error: " + err.Error(), true, false
+		}
+		var target *storage.Member
+		for _, mem := range members {
+			if strings.HasPrefix(mem.PubkeyHash, prefix) {
+				target = mem
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Sprintf("no member matching %q", prefix), true, false
+		}
+		if target.Role == "owner" {
+			return "cannot kick the owner", true, false
+		}
+		if err := m.store.RemoveMember(target.PubkeyHash); err != nil {
+			return "error: " + err.Error(), true, false
+		}
+		return fmt.Sprintf("✓ kicked %s", target.PubkeyHash[:16]+"…"), false, false
+
+	// ── init ──────────────────────────────────────────────────────────────────
+	case "init":
+		if hasOwner, _ := m.store.HasOwner(); hasOwner {
+			return "owner already exists — use: invite", true, false
+		}
+		// Reuse existing unused owner invite if any
+		invites, _ := m.store.ListInvites()
+		for _, inv := range invites {
+			if inv.Role == "owner" && inv.UseCount < inv.MaxUses {
+				onion, _ := m.store.GetMeta("onion_address")
+				link := mbBuildLink(onion, inv.Token)
+				lines := []string{
+					"  existing owner invite:",
+					"    token : " + inv.Token,
+					"    link  : " + link,
+				}
+				for _, l := range lines {
+					m.logLines = append(m.logLines, tuiCmdOkStyle.Render(l))
+				}
+				if m.ready {
+					m.viewport.SetContent(strings.Join(m.logLines, "\n"))
+					m.viewport.GotoBottom()
+				}
+				return "", false, false
+			}
+		}
+		token, err := storage.GenerateToken()
+		if err != nil {
+			return "error: " + err.Error(), true, false
+		}
+		inv := &storage.Invite{Token: token, Role: "owner", MaxUses: 1}
+		if err := m.store.CreateInvite(inv); err != nil {
+			return "error: " + err.Error(), true, false
+		}
+		onion, _ := m.store.GetMeta("onion_address")
+		link := mbBuildLink(onion, token)
+		lines := []string{
+			"  ✓ owner bootstrap invite created:",
+			"    token : " + token,
+			"    link  : " + link,
+			"  single-use. share this link with the owner to join.",
+		}
+		for _, l := range lines {
+			m.logLines = append(m.logLines, tuiCmdOkStyle.Render(l))
+		}
+		if m.ready {
+			m.viewport.SetContent(strings.Join(m.logLines, "\n"))
+			m.viewport.GotoBottom()
+		}
+		return "", false, false
+
+	// ── invite ────────────────────────────────────────────────────────────────
 	case "invite":
 		days := 7
 		if len(args) > 0 {
@@ -369,44 +523,132 @@ func (m *tuiModel) execCommand(raw string) (result string, isErr bool, quit bool
 			}
 		}
 		if hasOwner, _ := m.store.HasOwner(); !hasOwner {
-			return "no owner yet — run: fialka mailbox init", true, false
+			return "no owner yet — run: init", true, false
 		}
 		token, err := storage.GenerateToken()
 		if err != nil {
-			return "error generating token: " + err.Error(), true, false
+			return "error: " + err.Error(), true, false
 		}
 		var expiresAt int64
+		expDesc := "never"
 		if days > 0 {
 			expiresAt = time.Now().Add(time.Duration(days) * 24 * time.Hour).Unix()
+			expDesc = fmt.Sprintf("%d days", days)
 		}
 		inv := &storage.Invite{Token: token, Role: "member", MaxUses: 1, ExpiresAt: expiresAt}
 		if err := m.store.CreateInvite(inv); err != nil {
 			return "error: " + err.Error(), true, false
 		}
 		onion, _ := m.store.GetMeta("onion_address")
-		return fmt.Sprintf("✓ invite (1-use, %dd): %s", days, mbBuildLink(onion, token)), false, false
+		link := mbBuildLink(onion, token)
+		lines := []string{
+			fmt.Sprintf("  ✓ member invite (1-use, expires: %s):", expDesc),
+			"    " + link,
+		}
+		for _, l := range lines {
+			m.logLines = append(m.logLines, tuiCmdOkStyle.Render(l))
+		}
+		if m.ready {
+			m.viewport.SetContent(strings.Join(m.logLines, "\n"))
+			m.viewport.GotoBottom()
+		}
+		return "", false, false
 
-	case "status":
-		stats, err := m.store.Stats()
+	// ── invites ───────────────────────────────────────────────────────────────
+	case "invites":
+		invites, err := m.store.ListInvites()
 		if err != nil {
 			return "error: " + err.Error(), true, false
 		}
-		return fmt.Sprintf("pending=%d  recipients=%d  size=%s",
-			stats.PendingMessages, stats.Recipients, tuiFormatBytes(stats.TotalSizeBytes)), false, false
+		if len(invites) == 0 {
+			return "no invites — run: init or invite", false, false
+		}
+		for _, inv := range invites {
+			tok := inv.Token
+			if len(tok) > 16 {
+				tok = tok[:16] + "…"
+			}
+			exp := "never"
+			if inv.ExpiresAt > 0 {
+				if time.Now().Unix() > inv.ExpiresAt {
+					exp = "EXPIRED"
+				} else {
+					exp = time.Unix(inv.ExpiresAt, 0).Format("2006-01-02")
+				}
+			}
+			line := fmt.Sprintf("  %-10s  uses:%d/%d  exp:%-12s  %s",
+				inv.Role, inv.UseCount, inv.MaxUses, exp, tok)
+			m.logLines = append(m.logLines, tuiCmdOkStyle.Render(line))
+		}
+		if m.ready {
+			m.viewport.SetContent(strings.Join(m.logLines, "\n"))
+			m.viewport.GotoBottom()
+		}
+		return "", false, false
 
+	// ── revoke ────────────────────────────────────────────────────────────────
+	case "revoke":
+		if len(args) == 0 {
+			return "usage: revoke <token_prefix>", true, false
+		}
+		prefix := args[0]
+		invites, err := m.store.ListInvites()
+		if err != nil {
+			return "error: " + err.Error(), true, false
+		}
+		var target *storage.Invite
+		for _, inv := range invites {
+			if strings.HasPrefix(inv.Token, prefix) {
+				target = inv
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Sprintf("no invite matching %q", prefix), true, false
+		}
+		if err := m.store.RevokeInvite(target.Token); err != nil {
+			return "error: " + err.Error(), true, false
+		}
+		short := target.Token
+		if len(short) > 16 {
+			short = short[:16] + "…"
+		}
+		return fmt.Sprintf("✓ revoked invite %s", short), false, false
+
+	// ── config ────────────────────────────────────────────────────────────────
+	case "config":
+		p := m.cfgPath
+		if p == "" {
+			home, _ := os.UserHomeDir()
+			p = home + "/.config/fialka-mailbox/config.toml"
+		}
+		return "config: " + p, false, false
+
+	// ── logs ──────────────────────────────────────────────────────────────────
+	case "logs":
+		p := m.cfgPath
+		if p == "" {
+			home, _ := os.UserHomeDir()
+			p = home + "/.config/fialka-mailbox"
+		} else {
+			p = strings.TrimSuffix(p, "/config.toml")
+		}
+		return "log file: " + p + "/fialka-mailbox.log", false, false
+
+	// ── clear ─────────────────────────────────────────────────────────────────
 	case "clear":
 		m.logLines = nil
-		m.cmdResult = ""
 		if m.ready {
 			m.viewport.SetContent("")
 		}
 		return "", false, false
 
+	// ── quit ──────────────────────────────────────────────────────────────────
 	case "quit", "q", "exit", "stop":
 		return "", false, true
 
 	default:
-		return fmt.Sprintf("unknown command %q — type 'help'", cmd), true, false
+		return fmt.Sprintf("unknown: %q — type 'help'", cmd), true, false
 	}
 }
 

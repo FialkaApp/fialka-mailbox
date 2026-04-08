@@ -207,7 +207,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		// Server runs in background; TUI drives the main goroutine.
 		go func() { _ = srv.ListenAndServe(ctx, cfg.Server.Listen) }()
 
-		model := newTUIModel(onionAddr, store, cancel, logCh)
+		model := newTUIModel(onionAddr, store, cancel, logCh, cfgPath)
 		p := tea.NewProgram(model, tea.WithAltScreen())
 		_, runErr := p.Run()
 		cancel() // ensure server goroutine stops when TUI exits

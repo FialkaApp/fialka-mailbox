@@ -33,12 +33,12 @@ Chaque suppression est confirmée individuellement.`,
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 var (
-	unBold    = lipgloss.NewStyle().Bold(true)
-	unRed     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	unGreen   = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
-	unYellow  = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	unCyan    = lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
-	unDim     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	unBold   = lipgloss.NewStyle().Bold(true)
+	unRed    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	unGreen  = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	unYellow = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	unCyan   = lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
+	unDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 
 func unStep(title string) {
@@ -48,7 +48,9 @@ func unStep(title string) {
 func unOk(msg string)   { fmt.Printf("      %s  %s\n", unGreen.Render("✓"), msg) }
 func unWarn(msg string) { fmt.Printf("      %s   %s\n", unYellow.Render("⚠"), msg) }
 func unInfo(msg string) { fmt.Printf("      %s  %s\n", unDim.Render("→"), msg) }
-func unHr()             { fmt.Println(unDim.Render("  ────────────────────────────────────────────────")) }
+func unHr() {
+	fmt.Println(unDim.Render("  ────────────────────────────────────────────────"))
+}
 
 // confirm asks a y/n question and returns true if the user confirms.
 func unConfirm(question string) bool {
@@ -85,8 +87,8 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Println(unBold.Render("  Sera proposé à la suppression :"))
 	fmt.Println("    • Service systemd   fialka-mailbox")
-	fmt.Println("    • Binaire           /usr/local/bin/fialka")
-	fmt.Println("    • Configuration     /etc/fialka-mailbox/")
+	fmt.Println("    • Binaire           /usr/local/bin/fialka  (ou binaire courant)")
+	fmt.Println("    • Configuration     /etc/fialka-mailbox/  (ou ~/.config/fialka-mailbox/)")
 	fmt.Println("    • Données           /var/lib/fialka-mailbox/  " + unRed.Render("(irreversible — inclut l'adresse .onion)"))
 	fmt.Println("    • Utilisateur       fialka")
 	fmt.Println("    • Tor               (optionnel)")
@@ -136,7 +138,16 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	//  BINARY
 	// ════════════════════════════════════════════════════════
 	unStep("2 / 6  —  Binaire")
+
+	// Candidates: system install path + current executable (dev/local build)
 	binaryPath := "/usr/local/bin/fialka"
+	if selfExe, err := os.Executable(); err == nil {
+		selfExe, _ = filepath.EvalSymlinks(selfExe)
+		if selfExe != binaryPath && fileExists(selfExe) {
+			// Running from a local build (e.g. ./fialka) — propose removing it too
+			binaryPath = selfExe
+		}
+	}
 
 	if fileExists(binaryPath) {
 		fmt.Println()
@@ -159,7 +170,17 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	//  CONFIGURATION
 	// ════════════════════════════════════════════════════════
 	unStep("3 / 6  —  Configuration")
+
+	// System install: /etc/fialka-mailbox — user/dev install: $HOME/.config/fialka-mailbox
 	configDir := "/etc/fialka-mailbox"
+	if !dirExists(configDir) {
+		if home, err := os.UserHomeDir(); err == nil {
+			alt := filepath.Join(home, ".config", "fialka-mailbox")
+			if dirExists(alt) {
+				configDir = alt
+			}
+		}
+	}
 
 	if dirExists(configDir) {
 		fmt.Println()
@@ -186,9 +207,15 @@ func runUninstall(cmd *cobra.Command, args []string) error {
 	//  DATA (onion key + database) — critical warning
 	// ════════════════════════════════════════════════════════
 	unStep("4 / 6  —  Données (base de données + clé .onion)")
-	dataDir := "/var/lib/fialka-mailbox"
 
-	if dirExists(dataDir) {
+	// System install: /var/lib/fialka-mailbox — user/dev install: same as configDir (combined)
+	dataDir := "/var/lib/fialka-mailbox"
+	if !dirExists(dataDir) {
+		// In user/dev mode config and data are in the same directory — already handled above
+		dataDir = ""
+	}
+
+	if dataDir != "" && dirExists(dataDir) {
 		fmt.Println()
 		fmt.Println(unRed.Render("  ⚠  ATTENTION — Cette action est IRREVERSIBLE"))
 		fmt.Println()

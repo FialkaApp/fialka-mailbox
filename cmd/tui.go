@@ -301,7 +301,7 @@ func (m tuiModel) View() string {
 
 	// ── Title line: brand left | stats right ──────────────────────────────────
 	left := tuiBrandStyle.Render("  🔐 FIALKA MAILBOX ") +
-		tuiVerStyle.Render("v0.2.0") +
+		tuiVerStyle.Render("v"+Version) +
 		tuiDotStyle.Render("  ●  UP ") +
 		tuiUptimeStyle.Render(uptime)
 

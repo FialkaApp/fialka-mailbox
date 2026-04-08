@@ -1,0 +1,65 @@
+# .goreleaser.yml — Fialka Mailbox release pipeline
+# Docs: https://goreleaser.com
+# Run: goreleaser release --clean
+version: 2
+
+project_name: fialka-mailbox
+
+before:
+  hooks:
+    - go mod tidy
+    - go vet ./...
+
+builds:
+  - id: fialka
+    main: ./main.go
+    binary: fialka
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    ldflags:
+      - -s -w
+      - -X github.com/fialkaapp/fialka-mailbox/cmd.Version={{.Version}}
+      - -X github.com/fialkaapp/fialka-mailbox/cmd.Commit={{.Commit}}
+      - -X github.com/fialkaapp/fialka-mailbox/cmd.Date={{.Date}}
+
+archives:
+  - id: default
+    # install.sh expects: fialka-mailbox_linux_amd64  (no archive, raw binary)
+    format: binary
+    name_template: "fialka-mailbox_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+
+checksum:
+  name_template: checksums.sha256
+  algorithm: sha256
+
+release:
+  github:
+    owner: FialkaApp
+    name: fialka-mailbox
+  name_template: "v{{ .Version }}"
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Installation rapide
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/FialkaApp/fialka-mailbox/main/deploy/install.sh | sudo bash
+    ```
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch

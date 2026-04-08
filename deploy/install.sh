@@ -59,7 +59,7 @@ ask_yn() {
   local prompt
   if [[ "$default" == "y" ]]; then prompt="[Y/n]"; else prompt="[y/N]"; fi
   echo -en "\n  ${BOLD}▶${RESET} $question $prompt "
-  read -r answer
+  read -r answer </dev/tty
   answer="${answer:-$default}"
   [[ "$answer" =~ ^[Yy]$ ]]
 }
@@ -69,13 +69,13 @@ ask_value() {
   local question="$1"
   local default="$2"
   echo -en "\n  ${BOLD}▶${RESET} $question ${DIM}[${default}]${RESET}: "
-  read -r REPLY
+  read -r REPLY </dev/tty
   REPLY="${REPLY:-$default}"
 }
 
 pause() {
   echo -en "\n  ${DIM}Press Enter to continue...${RESET}"
-  read -r
+  read -r </dev/tty
 }
 
 # ── Root check ───────────────────────────────────────────────
@@ -419,7 +419,7 @@ else
 fi
 
 echo -en "\n  ${BOLD}Choix [${DEFAULT_PROT}]:${RESET} "
-read -r PROT_CHOICE
+read -r PROT_CHOICE </dev/tty
 PROT_CHOICE="${PROT_CHOICE:-$DEFAULT_PROT}"
 
 KEY_PROTECTION="plaintext"
@@ -446,14 +446,14 @@ if [ "$PROT_CHOICE" = "2" ]; then
   echo ""
   while true; do
     echo -en "  ${BOLD}Passphrase :${RESET} "
-    read -rs ONION_PASSPHRASE
+    read -rs ONION_PASSPHRASE </dev/tty
     echo ""
     if [ ${#ONION_PASSPHRASE} -lt 12 ]; then
       warn "Trop courte (min 12 caracteres). Recommencez."
       continue
     fi
     echo -en "  ${BOLD}Confirmez :${RESET} "
-    read -rs ONION_PASSPHRASE_CONFIRM
+    read -rs ONION_PASSPHRASE_CONFIRM </dev/tty
     echo ""
     if [ "$ONION_PASSPHRASE" = "$ONION_PASSPHRASE_CONFIRM" ]; then
       unset ONION_PASSPHRASE_CONFIRM
@@ -943,7 +943,7 @@ echo -e "    ${CYAN}1.${RESET} Tor daemon from the ${BOLD}official Tor Project r
 echo -e "    ${CYAN}2.${RESET} fialka-mailbox binary"
 echo -e "    ${CYAN}3.${RESET} systemd service (auto-start on boot)"
 echo ""
-read -rp "  Continue? [y/N] " confirm
+read -rp "  Continue? [y/N] " confirm </dev/tty
 [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
 
 # ════════════════════════════════════════════════════════════
